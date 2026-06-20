@@ -56,8 +56,7 @@ The system includes:
 
 1. Copy `.env.example` to `.env`.
 2. Add real API credentials only to `.env`.
-3. Never commit or publish `.env`.
-4. Start the application:
+3. Start the application:
 
 ```powershell
 docker compose up --build
@@ -92,6 +91,3 @@ This project is an active development prototype. The core AI-agent pipeline is
 implemented, while real lead-source integrations, automated tests,
 authentication, durable queues, monitoring, and production deployment remain
 future work.
-
-See [PROJECT_DETAILED_SUMMARY.txt](PROJECT_DETAILED_SUMMARY.txt) for the full
-architecture, completed work, known risks, and development roadmap.
