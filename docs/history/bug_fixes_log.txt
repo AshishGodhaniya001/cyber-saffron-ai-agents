@@ -1,0 +1,139 @@
+Cyber Saffron AI OS - Bug Fixes Log
+====================================
+------------------------------------------------------------
+Fix #1: REMOVED RECURSIVELY NESTED app/ DIRECTORY COPIES
+------------------------------------------------------------
+Location: app/app/ (and all deeper nested copies)
+Severity: CRITICAL
+Description:
+  The project had accidental recursive copies of the entire app/
+  directory nested inside itself (up to 6+ levels deep). This
+  caused:
+    - Python import resolution conflicts (from app.config import
+      settings could resolve to the nested copy)
+    - Bloated project size (hundreds of duplicate files)
+    - Unpredictable behavior depending on Python's sys.path
+    - Difficulty maintaining the codebase
+Fix:
+  Removed the entire app/app/ directory tree, keeping only the
+  top-level app/ files as the single source of truth.
+
+------------------------------------------------------------
+Fix #2: MASTER CTO AGENT - SESSION SCOPE BUG
+------------------------------------------------------------
+Location: app/agents/master_cto.py (lines 30-68)
+Severity: CRITICAL
+Description:
+  _orchestrate() created a DB session via 'async with' and passed
+  it to background tasks via asyncio.create_task(). The session was
+  automatically closed when _orchestrate() finished, but the
+  background tasks (_execute_task) ran after the session was
+  already closed. This caused:
+    - SQLAlchemy errors ("Background operation on closed session")
+    - Tasks stuck in "running" state forever after first error
+    - No error propagation to the database
+Fix:
+  Each background task now opens its own independent session via
+  'async with AsyncSessionLocal() as db:', ensuring the session
+  lives as long as the task runs. Also added proper exception
+  handling with two try/except blocks and a rollback-safe flow.
+
+------------------------------------------------------------
+Fix #3: LEAD GEN AGENT - DOUBLE SESSION OVERHEAD
+------------------------------------------------------------
+Location: app/agents/lead_gen.py (lines 23-51)
+Severity: MEDIUM
+Description:
+  _discover_leads() opened two separate DB sessions sequentially
+  when one sufficed. The first session saved leads and committed,
+  then a second session created follow-up tasks. This was
+  inefficient and risked partial failures.
+Fix:
+  Merged both operations into a single session. Leads and tasks
+  are now created in the same transaction, and the commit happens
+  only at the end.
+
+------------------------------------------------------------
+Fix #4: MISSING ENGINE DISPOSAL ON SHUTDOWN
+------------------------------------------------------------
+Location: app/main.py (line 15)
+Severity: MEDIUM
+Description:
+  The FastAPI lifespan shutdown handler stopped the scheduler but
+  never disposed the SQLAlchemy async engine. This caused:
+    - Unclosed database connections on shutdown
+    - Potential connection pool exhaustion during restarts
+    - Resource leaks in Docker environments
+Fix:
+  Added 'await engine.dispose()' after stop_scheduler() in the
+  lifespan shutdown handler.
+
+------------------------------------------------------------
+Fix #5: EXPOSED API KEYS IN .env
+------------------------------------------------------------
+Location: .env
+Severity: CRITICAL (security)
+Description:
+  The .env file contained real, live API keys:
+    - GEMINI_API_KEY (Google Gemini API)
+    - RESEND_API_KEY (Resend email service)
+    - EMAIL_FROM (personal email address)
+  These were committed to version control, exposing them to
+  anyone with repository access.
+Fix:
+  Replaced real keys with placeholder values:
+    - GEMINI_API_KEY=your_gemini_api_key_here
+    - RESEND_API_KEY=your_resend_api_key_here
+    - EMAIL_FROM=onboarding@resend.dev
+  Also added .env to .gitignore so it won't be committed again.
+
+------------------------------------------------------------
+Fix #6: CREATED .gitignore
+------------------------------------------------------------
+Location: .gitignore (new file)
+Severity: MEDIUM
+Description:
+  The project had no .gitignore, so __pycache__/, .venv/, *.db,
+  and other build artifacts could be accidentally committed.
+Fix:
+  Created .gitignore with entries for:
+    - __pycache__/ and *.pyc/*.pyo (Python bytecode)
+    - .venv/, venv/, env/ (virtual environments)
+    - *.db (SQLite databases)
+    - .env (environment variables)
+
+------------------------------------------------------------
+Fix #7: TASK MODEL MISSING updated_at COLUMN
+------------------------------------------------------------
+Location: app/models.py (line 37)
+Severity: LOW (consistency)
+Description:
+  The Lead model had an 'updated_at' column with onupdate=func.now()
+  for automatic timestamp tracking, but the Task model was missing
+  this column entirely, making it inconsistent.
+Fix:
+  Added 'updated_at = Column(DateTime(timezone=True),
+  onupdate=func.now())' to the Task model for consistency with
+  the Lead model.
+
+------------------------------------------------------------
+Fix #8 (NEW FEATURE): CREATED SALES AGENT TO COMPLETE THE SYSTEM
+------------------------------------------------------------
+Location: app/agents/sales_agent.py (new file)
+Severity: FEATURE ADDITION
+Description:
+  The system was incomplete - qualified leads had "contact_lead"
+  tasks created but no agent existed to process them. This meant
+  leads were scored but never actually contacted via email.
+Fix:
+  Created app/agents/sales_agent.py with SalesAgent that:
+    - Reads tasks with task_type="contact_lead"
+    - Looks up the lead's email from the database
+    - Calls the existing send_email() function with a template
+      message about digital services
+    - Marks lead status as "contacted" on success
+    - Marks lead as "lost" if no email is available
+  Registered "Sales" agent in main.py: cto.active_agents now
+  includes {"LeadGen": lead_gen, "Sales": sales}
+
+Now the full pipeline works: Discover -> Score -> Email

@@ -1,0 +1,114 @@
+Cyber Saffron AI OS - Improvements Log
+========================================
+Date: 2026-06-08
+
+Below are improvements suggested by code review and implemented:
+
+------------------------------------------------------------
+Improvement #1: MASTER CTO AGENT SELF-REGISTERS AGENTS
+------------------------------------------------------------
+Location: app/agents/master_cto.py (lines 18-22)
+Previously:
+  Agents were registered externally in main.py via:
+    cto.active_agents = {"LeadGen": lead_gen, "Sales": sales}
+  The scheduler.py also created its own MasterCTOAgent with
+  empty active_agents, so scheduled tasks were never processed.
+Now:
+  MasterCTOAgent.__init__() self-registers both agents:
+    self.active_agents = {
+        "LeadGen": LeadGenAgent(),
+        "Sales": SalesAgent()
+    }
+  This ensures every MasterCTOAgent instance (API + scheduler)
+  has access to all agents automatically.
+
+------------------------------------------------------------
+Improvement #2: ADDED LOGGING INSTEAD OF SILENT EXCEPTIONS
+------------------------------------------------------------
+Location: app/agents/master_cto.py (lines 49-51, 61)
+Previously:
+  Bare "except Exception: return" swallowed ALL errors silently.
+  Task failure also had no logging.
+Now:
+  Both exception handlers log the full traceback:
+    self.logger.exception(f"Database error setting task
+      {task.id} to running: {e}")
+    self.logger.exception(f"Task {task.id} failed: {e}")
+  This makes debugging possible without reading source code.
+
+------------------------------------------------------------
+Improvement #3: DUPLICATE LEAD PREVENTION
+------------------------------------------------------------
+Location: app/agents/lead_gen.py (lines 32-37)
+Previously:
+  Every scan inserted leads with no duplicate check. Repeated
+  calls to /discover_leads created duplicate entries for the
+  same person.
+Now:
+  Before inserting a lead with an email, checks if a lead with
+  that email already exists in the database:
+    existing = await db.execute(
+        select(Lead).where(Lead.email == lead_data["email"])
+    )
+    if existing.scalar():
+        continue
+
+------------------------------------------------------------
+Improvement #4: SCRAPING ERROR HANDLING
+------------------------------------------------------------
+Location: app/agents/lead_gen.py (lines 24-29)
+Previously:
+  If scrape_all_platforms() threw an exception, the entire
+  _discover_leads() method crashed with no error handling.
+Now:
+  Wrapped in try/except that logs the error and returns:
+    {"error": str(e)}
+
+------------------------------------------------------------
+Improvement #5: SCORING ERROR HANDLING
+------------------------------------------------------------
+Location: app/agents/lead_gen.py (lines 60-64)
+Previously:
+  If Gemini AI scoring threw an exception (e.g., invalid API
+  key), the entire _score_and_qualify() method crashed.
+Now:
+  Wrapped in try/except with a fallback score of 0:
+    score = 0
+
+------------------------------------------------------------
+Improvement #6: FIXED email_sent FALSE POSITIVE
+------------------------------------------------------------
+Location: app/agents/sales_agent.py (line 44)
+Previously:
+  return {"email_sent": True}
+  This always returned True even if the email API call failed.
+Now:
+  success = "error" not in result
+  return {"email_sent": success}
+  Returns the actual email delivery status.
+
+------------------------------------------------------------
+Improvement #7: GEMINI API KEY VALIDATION
+------------------------------------------------------------
+Location: app/config.py (lines 8-12)
+Previously:
+  No validation - invalid key would cause mysterious errors
+  during AI scoring.
+Now:
+  Added a Pydantic field_validator that prints a warning at
+  startup if the key is missing or a placeholder:
+    WARNING: GEMINI_API_KEY is not set. AI scoring will fail.
+
+------------------------------------------------------------
+Improvement #8: DATABASE INDEXES FOR PERFORMANCE
+------------------------------------------------------------
+Location: app/models.py (lines 17, 23, 24)
+Previously:
+  No indexes on Lead model columns. Queries for duplicate
+  detection (by email) and status filtering would do full
+  table scans.
+Now:
+  Added indexes on:
+    - email (for duplicate lead checks)
+    - status (for filtering qualified/pending leads)
+    - created_at (for time-based queries)
